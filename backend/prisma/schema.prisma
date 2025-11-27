@@ -1,0 +1,463 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  firstName String
+  lastName  String
+  role      String   @default("BUSINESS_OWNER") // "SUPER_ADMIN" or "BUSINESS_OWNER"
+  isActive  Boolean  @default(true)
+  
+  // Business owner specific fields
+  businessName    String?
+  businessType    String?
+  businessPhone   String?
+  businessAddress String?
+  businessWebsite String?
+  
+  // Relations
+  businesses Business[]
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Business {
+  id          String  @id @default(cuid())
+  userId      String
+  name        String
+  type        String
+  description String?
+  website     String?
+  phone       String?
+  address     String?
+  
+  // Review page customization
+  brandColor    String  @default("#3B82F6")
+  logo          String?
+  customMessage String?
+  isPublished   Boolean @default(false)
+  
+  // Google Reviews integration
+  googleReviewUrl String?
+  
+  // Smart rating filter (redirect only 4-5 star reviews to Google)
+  enableSmartFilter Boolean @default(false)
+  
+  // Form builder settings
+  activeFormId    String? // Reference to active form template
+  
+  // Relations
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customers     Customer[]
+  reviews       Review[]
+  qrCodes       QRCode[]
+  formTemplates FormTemplate[]
+  aiPromptTemplates AIPromptTemplate[]
+  aiUsageAnalytics  AIUsageAnalytics[]
+  goals         BusinessGoal[]
+  insights      BusinessInsight[]
+  subscription  Subscription?
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("businesses")
+}
+
+model Customer {
+  id         String @id @default(cuid())
+  name       String
+  email      String
+  phone      String
+  businessId String
+  
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  reviews  Review[]
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+
+  @@index([businessId])
+  @@index([email])
+  @@index([createdAt])
+  @@map("customers")
+}
+
+model Review {
+  id              String @id @default(cuid())
+  customerId      String
+  businessId      String
+  rating          Int // 1-5 stars
+  feedback        String
+  generatedReview String?
+  status          String @default("PENDING") // "PENDING", "AI_GENERATED", "APPROVED", "PUBLISHED", "REJECTED"
+  googleReviewUrl String?
+  
+  // Form submission data (JSON)
+  formData        String? // Stores custom form field responses
+  submissionStep  String @default("SUBMITTED") // "DRAFT", "SUBMITTED", "PROCESSING", "COMPLETED"
+  
+  // Relations
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  aiGeneration AIReviewGeneration?
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([customerId])
+  @@index([createdAt])
+  @@index([status])
+  @@map("reviews")
+}
+
+model QRCode {
+  id          String  @id @default(cuid())
+  businessId  String
+  qrCodeUrl   String // URL customer lands on
+  qrImageUrl  String? // Cloudinary URL for QR image
+  title       String  @default("Leave us a review")
+  scansCount  Int     @default(0)
+  isActive    Boolean @default(true)
+  
+  // Customization options
+  backgroundColor String @default("#FFFFFF")
+  foregroundColor String @default("#000000")
+  size           Int    @default(300)
+  logoUrl        String?
+  errorCorrection String @default("M") // L, M, Q, H
+  
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  scans    QRScan[]
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([isActive])
+  @@map("qr_codes")
+}
+
+model QRScan {
+  id        String   @id @default(cuid())
+  qrCodeId  String
+  ipAddress String?
+  userAgent String?
+  location  String? // JSON: { city, country, etc. }
+  
+  // Relations
+  qrCode QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+  
+  // Timestamps
+  scannedAt DateTime @default(now())
+
+  @@index([qrCodeId])
+  @@index([scannedAt])
+  @@map("qr_scans")
+}
+
+model SystemAnalytics {
+  id             String   @id @default(cuid())
+  totalUsers     Int      @default(0)
+  totalBusinesses Int     @default(0)
+  totalCustomers Int      @default(0)
+  totalReviews   Int      @default(0)
+  totalQRScans   Int      @default(0)
+  date           DateTime @unique
+  createdAt      DateTime @default(now())
+
+  @@map("system_analytics")
+}
+
+// Form Builder Models
+model FormTemplate {
+  id          String @id @default(cuid())
+  businessId  String
+  name        String
+  description String?
+  isActive    Boolean @default(true)
+  version     Int     @default(1)
+  
+  // Form configuration
+  settings    String // JSON: { theme, branding, navigation, etc. }
+  
+  // Relations
+  business   Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  fields     FormField[]
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([isActive])
+  @@map("form_templates")
+}
+
+model FormField {
+  id           String @id @default(cuid())
+  templateId   String
+  fieldType    String // "text", "email", "phone", "rating", "dropdown", "checkbox", "textarea"
+  label        String
+  placeholder  String?
+  isRequired   Boolean @default(false)
+  order        Int     @default(0)
+  
+  // Field configuration
+  options      String? // JSON: for dropdown/checkbox options
+  validation   String? // JSON: validation rules
+  styling      String? // JSON: field-specific styling
+  
+  // Relations
+  template FormTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([templateId])
+  @@index([order])
+  @@map("form_fields")
+}
+
+// AI Enhancement Models
+model AIReviewGeneration {
+  id            String @id @default(cuid())
+  reviewId      String @unique
+  originalText  String
+  enhancedText  String
+  confidence    Float  @default(0.0) // 0.0 to 1.0
+  aiModel       String @default("gemini-pro")
+  
+  // AI analysis data
+  sentiment     String? // "positive", "negative", "neutral"
+  keywords      String? // JSON array of extracted keywords
+  improvements  String? // JSON array of improvement suggestions
+  
+  // Business approval
+  status        String @default("PENDING") // "PENDING", "APPROVED", "REJECTED", "REGENERATED"
+  approvedBy    String? // Business owner who approved
+  rejectionNote String?
+  
+  // Relations
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  
+  // Timestamps
+  generatedAt DateTime @default(now())
+  approvedAt  DateTime?
+
+  @@index([reviewId])
+  @@index([status])
+  @@index([generatedAt])
+  @@map("ai_review_generations")
+}
+
+model AIPromptTemplate {
+  id            String  @id @default(cuid())
+  businessId    String?
+  name          String
+  description   String?
+  promptText    String
+  category      String  @default("REVIEW_ENHANCEMENT") // "REVIEW_ENHANCEMENT", "SENTIMENT_ANALYSIS", "KEYWORD_EXTRACTION"
+  isDefault     Boolean @default(false)
+  isActive      Boolean @default(true)
+  
+  // Template variables
+  variables     String? // JSON: available variables for the prompt
+  
+  // Usage statistics
+  usageCount    Int     @default(0)
+  successRate   Float   @default(0.0)
+  
+  // Relations
+  business Business? @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([category])
+  @@index([isActive])
+  @@map("ai_prompt_templates")
+}
+
+model AIUsageAnalytics {
+  id              String   @id @default(cuid())
+  businessId      String?
+  operation       String   // "REVIEW_ENHANCEMENT", "SENTIMENT_ANALYSIS", "KEYWORD_EXTRACTION"
+  tokensUsed      Int      @default(0)
+  responseTime    Int      @default(0) // in milliseconds
+  success         Boolean  @default(true)
+  errorMessage    String?
+  
+  // Cost tracking
+  estimatedCost   Float    @default(0.0)
+  
+  // Relations
+  business Business? @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+
+  @@index([businessId])
+  @@index([operation])
+  @@index([createdAt])
+  @@map("ai_usage_analytics")
+}
+
+// Goal Tracking Models
+model BusinessGoal {
+  id            String   @id @default(cuid())
+  businessId    String
+  title         String
+  description   String?
+  type          String   // "REVIEWS", "RATING", "QR_SCANS", "CUSTOMERS"
+  targetValue   Int
+  currentValue  Int      @default(0)
+  targetDate    DateTime
+  status        String   @default("ACTIVE") // "ACTIVE", "COMPLETED", "PAUSED", "EXPIRED"
+  priority      String   @default("MEDIUM") // "LOW", "MEDIUM", "HIGH"
+  
+  // Progress tracking
+  progressPercent Float   @default(0.0)
+  
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  milestones BusinessMilestone[]
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  completedAt DateTime?
+
+  @@index([businessId])
+  @@index([status])
+  @@index([type])
+  @@map("business_goals")
+}
+
+model BusinessMilestone {
+  id          String   @id @default(cuid())
+  goalId      String
+  title       String
+  value       Int
+  achieved    Boolean  @default(false)
+  
+  // Relations
+  goal BusinessGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  achievedAt DateTime?
+
+  @@index([goalId])
+  @@map("business_milestones")
+}
+
+// Automated Insights Models
+model BusinessInsight {
+  id           String   @id @default(cuid())
+  businessId   String
+  type         String   // "PERFORMANCE", "RECOMMENDATION", "TREND", "ALERT"
+  category     String   // "REVIEWS", "QR_CODES", "CUSTOMERS", "GENERAL"
+  title        String
+  description  String
+  severity     String   @default("INFO") // "INFO", "WARNING", "SUCCESS", "ERROR"
+  actionable   Boolean  @default(false)
+  
+  // Insight data
+  data         String?  // JSON data for the insight
+  confidence   Float    @default(0.0) // 0.0 to 1.0
+  
+  // Status tracking
+  isRead       Boolean  @default(false)
+  isArchived   Boolean  @default(false)
+  
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  readAt    DateTime?
+
+  @@index([businessId])
+  @@index([type])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("business_insights")
+}
+
+// Industry Benchmarks
+model IndustryBenchmark {
+  id           String   @id @default(cuid())
+  industry     String   // "RESTAURANT", "RETAIL", "HEALTHCARE", etc.
+  metricType   String   // "AVERAGE_REVIEWS", "AVERAGE_RATING", "QR_SCAN_RATE"
+  value        Float
+  period       String   @default("MONTHLY") // "WEEKLY", "MONTHLY", "YEARLY"
+  
+  // Metadata
+  sampleSize   Int      @default(0)
+  lastUpdated  DateTime @default(now())
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([industry, metricType, period])
+  @@index([industry])
+  @@index([metricType])
+  @@map("industry_benchmarks")
+}
+
+model Subscription {
+  id               String   @id @default(cuid())
+  businessId       String   @unique
+  planId           String   // 'FREE', 'PRO', 'ULTIMATE'
+  planName         String
+  price            Float
+  status           String   @default("ACTIVE") // 'ACTIVE', 'CANCELLED', 'EXPIRED', 'PENDING'
+  paymentIntentId  String?  // Stripe payment intent ID
+  
+  // Subscription period
+  startDate        DateTime @default(now())
+  endDate          DateTime
+  cancelledAt      DateTime?
+  
+  // Plan features (stored as JSON)
+  features         String   // JSON string of features
+  
+  // Relations
+  business         Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  
+  // Timestamps
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([status])
+  @@index([endDate])
+  @@map("subscriptions")
+}
